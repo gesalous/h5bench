@@ -30,6 +30,13 @@
 #include <sys/resource.h>
 #endif
 
+#define PARALLAX              1
+#define PRINT_DATASPACE_STAFF 1
+#if PARALLAX
+#define PARALLAX_VOL_CONNECTOR_VALUE ((H5VL_class_value_t)12202)
+#define PARALLAX_VOL_CONNECTOR_NAME  "parallax_vol_connector"
+#endif
+
 /* Define Constants */
 #define NUM_ATTRIBUTES 64
 #define ATTRIBUTE_SIZE 1024
@@ -64,6 +71,52 @@ typedef struct sim_params_t {
     double timestep;
 } sim_params_t;
 
+#if PRINT_DATASPACE_STAFF
+void
+h5ex_print_filespace(hid_t fileDataSpace)
+{
+    // Get the information about the dataspace
+    int      rank        = H5Sget_simple_extent_ndims(fileDataSpace);
+    hsize_t *dims_out    = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    hsize_t *maxdims_out = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    H5Sget_simple_extent_dims(fileDataSpace, dims_out, maxdims_out);
+
+    hsize_t *start_out  = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    hsize_t *stride_out = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    hsize_t *count_out  = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    hsize_t *block_out  = (hsize_t *)calloc(rank, sizeof(hsize_t));
+    H5Sget_regular_hyperslab(fileDataSpace, start_out, stride_out, count_out, block_out);
+
+    // Print the retrieved information
+    printf("Rank: %d\n", rank);
+    printf("Dimensions: ");
+    for (int i = 0; i < rank; i++) {
+        printf("%zu ", dims_out[i]);
+    }
+    printf("\nStart index: ");
+    for (int i = 0; i < rank; i++) {
+        printf("%zu ", start_out[i]);
+    }
+    printf("\nStride size: ");
+    for (int i = 0; i < rank; i++) {
+        printf("%zu ", stride_out[i]);
+    }
+    printf("\nBlock size: ");
+    for (int i = 0; i < rank; i++) {
+        printf("%zu ", block_out[i]);
+    }
+    printf("\nNumber of elements: %zu\n", H5Sget_select_npoints(fileDataSpace));
+
+    // Free allocated memory
+    free(dims_out);
+    free(maxdims_out);
+    free(start_out);
+    free(stride_out);
+    free(count_out);
+    free(block_out);
+}
+
+#endif
 /* Main Method of the HDF5 Exerciser */
 int
 main(int argc, char *argv[])
@@ -302,6 +355,15 @@ main(int argc, char *argv[])
     char dataSetName1[NAME_LENGTH] = "hdf5DataSet1";
 
     /* Create the file initially outside of the timing loop */
+#if PARALLAX
+    /* Register the connector by name */
+    hid_t vol_id = {0};
+    if ((vol_id = H5VLregister_connector_by_name(PARALLAX_VOL_CONNECTOR_NAME, H5P_DEFAULT)) < 0) {
+        fprintf(stderr, "Failed to register connector %s", PARALLAX_VOL_CONNECTOR_NAME);
+        _exit(EXIT_FAILURE);
+    }
+#endif
+
     hid_t fd, accessPropList, createPropList;
     createPropList = H5Pcreate(H5P_FILE_CREATE);
 
@@ -310,6 +372,9 @@ main(int argc, char *argv[])
      * mpi implementations and most apps will just do this once anyway. */
     accessPropList = H5Pcreate(H5P_FILE_ACCESS);
     H5Pset_fapl_mpio(accessPropList, comm, MPI_INFO_NULL);
+#if PARALLAX
+    H5Pset_vol(accessPropList, vol_id, NULL);
+#endif
     fd = H5Fcreate(testFileName, H5F_ACC_TRUNC, createPropList, accessPropList);
     rc = H5Fclose(fd);
 
@@ -590,11 +655,16 @@ main(int argc, char *argv[])
             MPI_Barrier(comm);
             startTime = MPI_Wtime();
             dataSet   = H5Dcreate(topgroupid, dataSetName1, H5T_NATIVE_DOUBLE, fileDataSpace, H5P_DEFAULT,
-                                dataSetPropList, H5P_DEFAULT);
+                                  dataSetPropList, H5P_DEFAULT);
             dataSetTime += (MPI_Wtime() - startTime);
 
             MPI_Barrier(comm);
             startTime = MPI_Wtime();
+
+#if PRINT_DATASPACE_STAFF
+            printf("Write\n");
+            h5ex_print_filespace(fileDataSpace);
+#endif
             H5Dwrite(dataSet, H5T_NATIVE_DOUBLE, memDataSpace, fileDataSpace, xferPropList, dataBuffer);
             timenow = MPI_Wtime();
             writeDataTime += (timenow - startTime);
@@ -705,6 +775,10 @@ main(int argc, char *argv[])
 
             MPI_Barrier(comm);
             startTime = MPI_Wtime();
+#if PRINT_DATASPACE_STAFF
+            printf("Read\n");
+            h5ex_print_filespace(fileDataSpace);
+#endif
             H5Dread(dataSet, H5T_NATIVE_DOUBLE, memDataSpace, fileDataSpace, xferPropList, checkBuffer);
             timenow = MPI_Wtime();
             readDataTime += (timenow - startTime);
@@ -790,7 +864,7 @@ main(int argc, char *argv[])
                 MPI_Barrier(comm);
                 startTime = MPI_Wtime();
                 dataSet   = H5Dcreate(dtgroupid, "simulation parameters", sp_type, fileDataSpace, H5P_DEFAULT,
-                                    dataSetPropList, H5P_DEFAULT);
+                                      dataSetPropList, H5P_DEFAULT);
                 dataSetTime += (MPI_Wtime() - startTime);
 
                 MPI_Barrier(comm);
