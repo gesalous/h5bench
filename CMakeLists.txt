@@ -9,6 +9,7 @@ include(ExternalProject)
 include(CTest)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Python REQUIRED)
 find_package(MPI REQUIRED)
